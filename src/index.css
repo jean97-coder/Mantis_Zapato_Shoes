@@ -1,0 +1,181 @@
+@import "tailwindcss";
+
+/* Slightly larger, more legible base type scale for the whole system — every
+   text-xs/sm/base/lg/xl class in the app resolves from these tokens, so this
+   single override raises the entire typographic hierarchy (titles, KPI
+   numbers, table cells) together without touching individual components. */
+@theme {
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.375rem;
+  --text-base: 1.0625rem;
+  --text-base--line-height: 1.625rem;
+  --text-lg: 1.1875rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl: 1.3125rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5625rem;
+  --text-2xl--line-height: 2.125rem;
+}
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  }
+}
+
+@media print {
+  @page {
+    size: auto;
+    margin: 8mm;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Chrome (and most browsers) drop background-colors and box-shadows by
+     default when printing, which is exactly why printed tickets/notes look
+     "washed out" or different from the on-screen preview. Forcing exact
+     color reproduction on the whole document makes the printed page match
+     what the user sees before hitting "Imprimir". */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  #root {
+    height: auto !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+
+  /* Print isolation: while a ticket/sales-note modal is open, hide every
+     single element on the page except that document, regardless of what
+     view, sidebar, header or other modal happens to be behind it. */
+  body.print-isolating * {
+    visibility: hidden !important;
+  }
+  body.print-isolating .print-isolate-target,
+  body.print-isolating .print-isolate-target * {
+    visibility: visible !important;
+  }
+  body.print-isolating .print-isolate-target {
+    position: absolute !important;
+    inset: 0 !important;
+    left: 0 !important;
+    top: 0 !important;
+    margin: 0 !important;
+    z-index: 999999 !important;
+  }
+
+  /* The printable document itself flows naturally across as many pages as it
+     needs — it must NOT be forced to avoid breaking as a whole, or a short
+     first page pushes the entire receipt onto page 2 (or clips it). Tighter
+     print-only spacing keeps documents that fit on one screen fitting on
+     one physical page too, instead of spilling one line onto a blank
+     second page. */
+  .printable-card {
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+    margin: 0 auto !important;
+    max-width: 100% !important;
+    border-radius: 4px !important;
+    padding: 1rem !important;
+    font-size: 0.92em;
+    line-height: 1.35;
+  }
+
+  /* The receipt-style ticket is short and bounded by design: it must always
+     land on exactly one physical page, never a stray near-empty second one. */
+  .printable-card.ticket-single-page {
+    break-after: avoid;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Only these smaller, self-contained blocks should avoid splitting mid-way */
+  .print-avoid-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  table {
+    break-inside: auto;
+  }
+  thead {
+    display: table-header-group;
+  }
+  tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}
+
+/* Header capsule glow/pulse effects — used by the "Atrasadas" and "Caja"
+   live indicators so urgent or active states read as alive, not static. */
+@keyframes ruby-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.5), 0 0 14px 2px rgba(244, 63, 94, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(244, 63, 94, 0), 0 0 22px 6px rgba(244, 63, 94, 0.7);
+  }
+}
+.animate-ruby-glow {
+  animation: ruby-glow-pulse 2.1s ease-in-out infinite;
+}
+
+@keyframes emerald-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 8px 1px rgba(16, 185, 129, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 15px 4px rgba(16, 185, 129, 0.55);
+  }
+}
+.animate-emerald-glow {
+  animation: emerald-glow-pulse 2.6s ease-in-out infinite;
+}
+
+/* Amber variant — deliveries due within the 3-day window but not yet
+   overdue: same urgent "alive" pulse language as ruby-glow, warmer color
+   so operators can tell "act soon" apart from "act now" at a glance. */
+@keyframes amber-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.5), 0 0 14px 2px rgba(245, 158, 11, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(245, 158, 11, 0), 0 0 22px 6px rgba(245, 158, 11, 0.7);
+  }
+}
+.animate-amber-glow {
+  animation: amber-glow-pulse 2.1s ease-in-out infinite;
+}
+
+/* Custom crisp scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d6d3d1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a29e;
+}

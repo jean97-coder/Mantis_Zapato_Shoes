@@ -1,0 +1,641 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =====================================================================
+// ENUMS
+// =====================================================================
+
+enum UserRole {
+  ADMIN
+  CAJERO
+  ZAPATERO
+  // Shared login used by all 3 business partners — carries the exact same
+  // privileges as ADMIN (requireRole() treats it as an alias), but reads
+  // correctly in the UI since a human, not an abstract "administrator",
+  // is behind it. The individual partner performing an action is still
+  // tracked separately via the Partner catalog (see partnerId on
+  // CashMovement), not by this role.
+  SOCIO_ADMIN
+}
+
+enum OrderStatus {
+  RECIBIDA
+  EN_DIAGNOSTICO
+  PRESUPUESTO_PENDIENTE
+  APROBADA
+  EN_ESPERA_DE_MATERIAL
+  EN_REPARACION
+  EN_RESTAURACION
+  CONTROL_CALIDAD
+  TERMINADA
+  LISTA_PARA_ENTREGAR
+  PENDIENTE_DE_PAGO
+  ENTREGADA
+  CERRADA
+  CANCELADA
+  RECHAZADA
+  NO_RETIRADA
+}
+
+enum OrderPriority {
+  NORMAL
+  URGENTE
+  MUY_URGENTE
+}
+
+// =====================================================================
+// IDENTITY & SECURITY
+// =====================================================================
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole
+  phone        String?
+  specialty    String?
+  avatar       String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignedOrders ServiceOrder[] @relation("AssignedTechnician")
+
+  @@map("users")
+}
+
+// =====================================================================
+// CRM
+// =====================================================================
+
+model Customer {
+  id         String    @id @default(cuid())
+  firstName  String
+  lastName   String
+  documentId String?
+  phone      String
+  whatsapp   String
+  email      String?
+  address    String?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  totalSpent Float     @default(0)
+  ordersCount Int      @default(0)
+  lastVisit  DateTime?
+
+  orders   ServiceOrder[]
+  payments Payment[]
+
+  @@map("customers")
+}
+
+// =====================================================================
+// SERVICE CATALOG
+// =====================================================================
+
+model ServiceCatalogItem {
+  id               String   @id @default(cuid())
+  code             String   @unique
+  name             String
+  category         String
+  description      String   @default("")
+  estimatedMinutes Int      @default(0)
+  standardPrice    Float
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  orderItems OrderServiceItem[]
+
+  @@map("service_catalog_items")
+}
+
+// =====================================================================
+// SERVICE ORDERS (Work Orders)
+// =====================================================================
+
+model ServiceOrder {
+  id           String   @id @default(cuid())
+  orderNumber  String   @unique
+  date         DateTime @default(now())
+  promisedDate DateTime
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  // --- Shoe details ---
+  shoeType             String
+  shoeBrand            String
+  shoeModel            String
+  shoeColor            String
+  shoeSize             String
+  shoeMaterial         String
+  pairCount            Int    @default(1)
+  conditionDescription String @default("")
+  currentStatusText    String @default("")
+  clientObservations   String @default("")
+
+  // --- Diagnosis (flexible / non-relational) ---
+  diagnosis Json?
+
+  // --- Budget ---
+  subtotal              Float     @default(0)
+  discount              Float     @default(0)
+  discountType          String    @default("FIXED")
+  discountValue         Float     @default(0)
+  taxes                 Float     @default(0)
+  total                 Float     @default(0)
+  laborCost             Float     @default(0)
+  materialCost          Float     @default(0)
+  budgetStatus          String    @default("pendiente")
+  budgetApprovedAt      DateTime?
+  budgetRejectionReason String?
+
+  status   OrderStatus   @default(RECIBIDA)
+  priority OrderPriority @default(NORMAL)
+
+  assignedTechnicianId   String?
+  assignedTechnician     User?   @relation("AssignedTechnician", fields: [assignedTechnicianId], references: [id])
+  assignedTechnicianName String?
+
+  branch                  String  @default("Sucursal Principal")
+  generalObservations     String  @default("")
+  serviceConditionsAgreed Boolean @default(true)
+
+  totalPaid      Float @default(0)
+  balancePending Float @default(0)
+
+  qualityControl Json?
+  deliveryInfo   Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items             ShoeItem[]
+  photos            ShoePhoto[]
+  services          OrderServiceItem[]
+  materialsConsumed MaterialConsumption[]
+  payments          Payment[]
+  timeline          OrderTimelineEvent[]
+  salesNote         SalesNote?
+  whatsappMessages  WhatsAppMessageRecord[]
+
+  @@index([status])
+  @@index([promisedDate])
+  @@index([customerId])
+  @@map("service_orders")
+}
+
+// One row per pair of shoes received in the order. The order's flat shoeType/
+// shoeBrand/.../diagnosis columns above always mirror items[0] (the "primary"
+// pair) so every existing single-shoe view keeps working unchanged; this table
+// is the source of truth for the full per-pair breakdown (own diagnosis, own
+// photos, own services) when an order has more than one pair.
+model ShoeItem {
+  id       String       @id @default(cuid())
+  orderId  String
+  order    ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  position Int          @default(1)
+
+  type                 String
+  brand                String
+  model                String @default("")
+  color                String @default("")
+  size                 String @default("")
+  material             String
+  pairCount            Int    @default(1)
+  conditionDescription String @default("")
+  clientObservations   String @default("")
+
+  diagnosis Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  photos   ShoePhoto[]
+  services OrderServiceItem[]
+
+  @@index([orderId])
+  @@map("shoe_items")
+}
+
+model ShoePhoto {
+  id           String   @id @default(cuid())
+  orderId      String
+  order        ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  shoeItemId   String?
+  shoeItem     ShoeItem? @relation(fields: [shoeItemId], references: [id], onDelete: Cascade)
+  url          String
+  type         String
+  stage        String
+  caption      String?
+  date         DateTime @default(now())
+  registeredBy String
+
+  @@index([orderId])
+  @@index([shoeItemId])
+  @@map("shoe_photos")
+}
+
+model OrderServiceItem {
+  id               String   @id @default(cuid())
+  orderId          String
+  order            ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  shoeItemId       String?
+  shoeItem         ShoeItem? @relation(fields: [shoeItemId], references: [id], onDelete: Cascade)
+  serviceId        String?
+  service          ServiceCatalogItem? @relation(fields: [serviceId], references: [id])
+  name             String
+  description      String   @default("")
+  price            Float
+  estimatedMinutes Int      @default(0)
+  technicianId     String?
+  technicianName   String?
+  status           String   @default("pendiente")
+  notes            String?
+
+  @@index([orderId])
+  @@index([shoeItemId])
+  @@map("order_service_items")
+}
+
+// =====================================================================
+// INVENTORY
+// =====================================================================
+
+model Material {
+  id            String  @id @default(cuid())
+  code          String  @unique
+  sku           String  @unique
+  name          String
+  category      String
+  brand         String  @default("")
+  unit          String
+  purchasePrice Float   @default(0)
+  costPrice     Float   @default(0)
+  currentStock  Float   @default(0)
+  minStock      Float   @default(0)
+  supplierId    String?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id])
+  location      String?
+  status        String  @default("activo")
+  isTool        Boolean @default(false)
+  createdAt     DateTime @default(now())
+
+  movements     InventoryMovement[]
+  consumptions  MaterialConsumption[]
+  purchaseItems PurchaseItem[]
+
+  @@index([status])
+  @@map("materials")
+}
+
+model MaterialConsumption {
+  id           String   @id @default(cuid())
+  orderId      String
+  order        ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  materialId   String
+  material     Material @relation(fields: [materialId], references: [id])
+  quantity     Float
+  unitCost     Float
+  totalCost    Float
+  registeredBy String
+  date         DateTime @default(now())
+
+  @@index([orderId])
+  @@index([materialId])
+  @@map("material_consumptions")
+}
+
+model InventoryMovement {
+  id           String   @id @default(cuid())
+  materialId   String
+  material     Material @relation(fields: [materialId], references: [id])
+  type         String
+  quantity     Float
+  previousStock Float
+  newStock     Float
+  reason       String
+  orderId      String?
+  registeredBy String
+  date         DateTime @default(now())
+
+  @@index([materialId])
+  @@map("inventory_movements")
+}
+
+model Supplier {
+  id            String   @id @default(cuid())
+  name          String
+  tradeName     String?
+  ruc           String?
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  materials Material[]
+  purchases Purchase[]
+
+  @@map("suppliers")
+}
+
+model Purchase {
+  id                    String   @id @default(cuid())
+  purchaseNumber        String   @unique
+  supplierId            String
+  supplier              Supplier @relation(fields: [supplierId], references: [id])
+  date                  DateTime @default(now())
+  invoiceDocumentNumber String?
+  subtotal              Float
+  discount              Float    @default(0)
+  taxes                 Float    @default(0)
+  total                 Float
+  paymentMethod         String
+  status                String   @default("COMPLETADA")
+  registeredBy          String
+
+  items PurchaseItem[]
+
+  @@map("purchases")
+}
+
+model PurchaseItem {
+  id         String   @id @default(cuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  materialId String
+  material   Material @relation(fields: [materialId], references: [id])
+  quantity   Float
+  unitCost   Float
+  discount   Float    @default(0)
+  total      Float
+
+  @@index([purchaseId])
+  @@index([materialId])
+  @@map("purchase_items")
+}
+
+// =====================================================================
+// FINANCE
+// =====================================================================
+
+model Payment {
+  id            String   @id @default(cuid())
+  orderId       String
+  order         ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  receiptNumber String   @unique
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id])
+  amount        Float
+  method        String
+  type          String
+  reference     String?
+  cashReceived  Float?
+  changeGiven   Float?
+  registeredBy  String
+  notes         String?
+  date          DateTime @default(now())
+
+  @@index([orderId])
+  @@index([customerId])
+  @@map("payments")
+}
+
+model CashRegister {
+  id                String    @id @default(cuid())
+  openedAt          DateTime  @default(now())
+  closedAt          DateTime?
+  openedBy          String
+  closedBy          String?
+  initialAmount     Float
+  currentCash       Float
+  expectedCash      Float
+  actualCashCounted Float?
+  difference        Float?
+  status            String    @default("ABIERTA")
+
+  movements CashMovement[]
+
+  @@index([status])
+  @@map("cash_registers")
+}
+
+model CashMovement {
+  id             String   @id @default(cuid())
+  cashRegisterId String
+  cashRegister   CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
+  type           String
+  amount         Float
+  concept        String
+  paymentMethod  String
+  orderId        String?
+  expenseId      String?
+  partnerId      String?
+  partner        Partner? @relation(fields: [partnerId], references: [id])
+  storeSaleId    String?
+  cashReceived   Float?
+  changeGiven    Float?
+  registeredBy   String
+  date           DateTime @default(now())
+
+  @@index([cashRegisterId])
+  @@map("cash_movements")
+}
+
+model Partner {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  notes     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  movements CashMovement[]
+
+  @@map("partners")
+}
+
+model Expense {
+  id            String   @id @default(cuid())
+  date          DateTime @default(now())
+  category      String
+  description   String
+  amount        Float
+  receiptNumber String?
+  paidWith      String
+  registeredBy  String
+
+  @@map("expenses")
+}
+
+model SalesNote {
+  id               String   @id @default(cuid())
+  noteNumber       String   @unique
+  orderId          String   @unique
+  order            ServiceOrder @relation(fields: [orderId], references: [id])
+  date             DateTime @default(now())
+  customerName     String
+  customerDocument String?
+  customerPhone    String?
+  customerAddress  String?
+  items            Json
+  subtotal         Float
+  discount         Float    @default(0)
+  taxes            Float    @default(0)
+  total            Float
+  paymentMethod    String
+  cashierName      String
+
+  @@map("sales_notes")
+}
+
+// =====================================================================
+// AUDIT & COMMUNICATIONS
+// =====================================================================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  timestamp DateTime @default(now())
+  userId    String?
+  userName  String
+  action    String
+  module    String
+  recordId  String?
+  details   String
+
+  @@map("audit_logs")
+}
+
+model WhatsAppMessageRecord {
+  id            String   @id @default(cuid())
+  orderId       String
+  order         ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customerName  String
+  customerPhone String
+  messageText   String
+  templateType  String
+  sentAt        DateTime @default(now())
+  status        String   @default("ENVIADO")
+  deliveryMode  String   @default("DIRECT_WEB")
+
+  @@index([orderId])
+  @@map("whatsapp_messages")
+}
+
+model OrderTimelineEvent {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status      String
+  title       String
+  description String
+  userName    String
+  userRole    String?
+  date        DateTime @default(now())
+
+  @@index([orderId])
+  @@map("order_timeline_events")
+}
+
+// =====================================================================
+// TIENDA / VENTA DIRECTA (store catalog + point-of-sale)
+// =====================================================================
+
+model StoreProduct {
+  id          String   @id @default(cuid())
+  code        String?  @unique
+  name        String
+  description String   @default("")
+  size        String
+  color       String
+  style       String   @default("")
+  price       Float
+  costPrice   Float    @default(0)
+  stock       Int      @default(0)
+  minStock    Int      @default(0)
+  imageUrl    String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  saleItems StoreSaleItem[]
+
+  @@index([active])
+  @@map("store_products")
+}
+
+model StoreSale {
+  id               String   @id @default(cuid())
+  saleNumber       String   @unique
+  date             DateTime @default(now())
+  customerName     String?
+  customerDocument String?
+  subtotal         Float
+  taxRatePercent   Float    @default(0)
+  taxAmount        Float    @default(0)
+  total            Float
+  paymentMethod    String
+  cashReceived     Float
+  changeGiven      Float
+  registeredBy     String
+
+  items StoreSaleItem[]
+
+  @@map("store_sales")
+}
+
+model StoreSaleItem {
+  id          String        @id @default(cuid())
+  saleId      String
+  sale        StoreSale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId   String?
+  product     StoreProduct? @relation(fields: [productId], references: [id])
+  productName String
+  size        String
+  color       String
+  quantity    Int
+  unitPrice   Float
+  totalPrice  Float
+
+  @@index([saleId])
+  @@map("store_sale_items")
+}
+
+// =====================================================================
+// SETTINGS (single row)
+// =====================================================================
+
+model AppSettings {
+  id                      String   @id @default("singleton")
+  businessName            String
+  commercialName          String?
+  ruc                     String?
+  address                 String?
+  phone                   String?
+  whatsapp                String?
+  email                   String?
+  website                 String?
+  logoUrl                 String?
+  defaultCurrency         String   @default("$")
+  taxRatePercent          Float    @default(0)
+  orderPrefix             String   @default("OS-")
+  nextOrderSequence       Int      @default(1)
+  storeSalePrefix         String   @default("VD-")
+  nextStoreSaleSequence   Int      @default(1)
+  standardServiceDays     Int      @default(3)
+  defaultConditions       String   @default("")
+  whatsappTemplates       Json
+  whatsappIntegrationMode String   @default("DIRECT_WEB_AND_API")
+
+  @@map("app_settings")
+}
