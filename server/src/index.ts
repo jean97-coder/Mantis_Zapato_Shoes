@@ -21,6 +21,7 @@ import { scheduleDailyDeliveryAlertJob } from './lib/telegram.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = Number(process.env.PORT) || 4000;
 
 // Cross-origin resource policy is relaxed (not "same-origin") because the
