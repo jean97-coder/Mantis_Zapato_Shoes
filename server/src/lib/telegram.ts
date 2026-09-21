@@ -190,15 +190,42 @@ export async function sendDeliveryAlertReport(): Promise<TelegramSendResult & { 
 
 let lastAutoAlertFireKey: string | null = null;
 
+const SCHEDULE_TIMEZONE = 'America/Guayaquil';
+
 /**
- * Starts the twice-daily automatic check: every minute, compares the local
- * clock against TELEGRAM_ALERT_HOURS (default "8,14" — 08:00 and 14:00) and
- * — once per hour slot per calendar day — sends the delivery-alert report
- * (same 3-day-rule / overdue filtering as the on-demand endpoint) if the bot
- * is configured. A minute-level poll (rather than fixed setTimeout calls) is
- * deliberately simple and survives `tsx watch` restarts without ever firing
- * twice for the same day+hour, since it only sends when the in-memory
- * "already sent this slot" key differs from the current one.
+ * Reads the current hour and calendar day as seen in Ecuador, regardless of
+ * the host/container's own system timezone (which on the VPS runs in UTC).
+ * Intl.DateTimeFormat with an explicit `timeZone` does the conversion itself
+ * — unlike Date.getHours(), it never depends on TZ/tzdata being configured
+ * at the OS level.
+ */
+function getEcuadorTimeParts(date: Date): { dateKey: string; hour: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: SCHEDULE_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  // Some ICU builds render midnight as "24" under hour12:false; normalize it.
+  const hour = Number(get('hour')) % 24;
+  const dateKey = `${get('year')}-${get('month')}-${get('day')}`;
+  return { dateKey, hour };
+}
+
+/**
+ * Starts the twice-daily automatic check: every minute, compares the current
+ * hour in America/Guayaquil against TELEGRAM_ALERT_HOURS (default "8,14" —
+ * 08:00 and 14:00 Ecuador time) and — once per hour slot per calendar day —
+ * sends the delivery-alert report (same 3-day-rule / overdue filtering as
+ * the on-demand endpoint) if the bot is configured. A minute-level poll
+ * (rather than fixed setTimeout calls) is deliberately simple and survives
+ * `tsx watch` restarts without ever firing twice for the same day+hour,
+ * since it only sends when the in-memory "already sent this slot" key
+ * differs from the current one.
  */
 export function scheduleDailyDeliveryAlertJob(): void {
   const targetHours = (process.env.TELEGRAM_ALERT_HOURS ?? '8,14')
@@ -209,18 +236,20 @@ export function scheduleDailyDeliveryAlertJob(): void {
   setInterval(async () => {
     if (!isTelegramConfigured()) return;
 
-    const now = new Date();
-    const hour = now.getHours();
+    const { dateKey, hour } = getEcuadorTimeParts(new Date());
     if (!targetHours.includes(hour)) return;
 
-    const fireKey = `${now.toISOString().split('T')[0]}-${hour}`;
+    const fireKey = `${dateKey}-${hour}`;
     if (lastAutoAlertFireKey === fireKey) return;
 
     lastAutoAlertFireKey = fireKey;
     try {
       const result = await sendDeliveryAlertReport();
       if (!result.ok) console.error('[telegram] Alerta automática de entregas falló:', result.description);
-      else console.log(`[telegram] Alerta automática de entregas enviada a las ${String(hour).padStart(2, '0')}:00 (${result.ordersCount} orden(es)).`);
+      else
+        console.log(
+          `[telegram] Alerta automática de entregas enviada a las ${String(hour).padStart(2, '0')}:00 America/Guayaquil (${result.ordersCount} orden(es)).`
+        );
     } catch (err) {
       console.error('[telegram] Error enviando la alerta automática de entregas:', err);
     }
