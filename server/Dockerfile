@@ -15,6 +15,11 @@ FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
+# Alpine's musl libc ignores the TZ env var unless the zoneinfo database is
+# present — without this, Date.getHours() (used by the Telegram delivery
+# alert scheduler) silently stays on UTC regardless of TZ.
+RUN apk add --no-cache tzdata
+
 # Copying the full node_modules from the build stage (instead of a fresh
 # `npm ci --omit=dev`) keeps the already-generated Prisma client and engine
 # binaries intact and avoids re-triggering `prisma generate` without the
