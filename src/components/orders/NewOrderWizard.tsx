@@ -397,7 +397,14 @@ export const NewOrderWizard: React.FC<NewOrderWizardProps> = ({ onSuccess, onCan
         items,
         discountType,
         discountValue,
-        status: advanceAmount > 0 ? 'APROBADA' : 'RECIBIDA',
+        // The wizard already collects services and their prices during
+        // reception, so budgetStatus is always 'aprobado' here — status must
+        // follow it into APROBADA regardless of whether an advance payment
+        // was taken today. Advance payment is a cash-flow event, not a
+        // workshop-readiness one; tying status to it left every order
+        // received without a deposit stuck at RECIBIDA (invisible in Mesa de
+        // Taller) even though the technical scope and price were agreed.
+        status: 'APROBADA',
         budgetStatus: 'aprobado',
         generalObservations: pairs.map(p => p.clientObservations).filter(Boolean).join(' | '),
         serviceConditionsAgreed: true,
